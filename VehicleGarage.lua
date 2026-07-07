@@ -13,6 +13,7 @@ local VEHICLE_TAG = "Vehicle"
 local SPAWN_DISTANCE = 10
 local SPAWN_COOLDOWN = 1.5
 local BUY_COOLDOWN = 0.5
+local FRONT_BUMPER_SLOT = "FrontBumper"
 
 local VehicleGarage = {}
 
@@ -41,6 +42,89 @@ local function getPlayerVehicleValue(player: Player, vehicleId: string): BoolVal
 	end
 
 	return nil
+end
+
+local function getPlayerCustomizationsFolder(player: Player): Folder?
+	local data = player:FindFirstChild("Data")
+	if not data then
+		return nil
+	end
+
+	return data:FindFirstChild("VehicleCustomizations")
+end
+
+local function getOrCreateVehicleCustomizationFolder(player: Player, vehicleId: string): Folder?
+	local customizationsFolder = getPlayerCustomizationsFolder(player)
+	if not customizationsFolder then
+		return nil
+	end
+
+	local vehicleFolder = customizationsFolder:FindFirstChild(vehicleId)
+	if not vehicleFolder then
+		vehicleFolder = Instance.new("Folder")
+		vehicleFolder.Name = vehicleId
+		vehicleFolder.Parent = customizationsFolder
+	end
+
+	return vehicleFolder :: Folder
+end
+
+local function getEquippedCustomization(player: Player, vehicleId: string, slotName: string): string?
+	local customizationsFolder = getPlayerCustomizationsFolder(player)
+	local vehicleFolder = customizationsFolder and customizationsFolder:FindFirstChild(vehicleId)
+	local equipped = vehicleFolder and vehicleFolder:FindFirstChild(slotName)
+	if equipped and equipped:IsA("StringValue") and equipped.Value ~= "" then
+		return equipped.Value
+	end
+
+	return nil
+end
+
+local function getCustomizationRoot(slotName: string): Folder?
+	local root = ReplicatedStorage:FindFirstChild("VehicleCustomizations")
+	if not root then
+		return nil
+	end
+
+	local slotFolderName = slotName == FRONT_BUMPER_SLOT and "FrontBumpers" or slotName
+	local slotFolder = root:FindFirstChild(slotFolderName)
+	if slotFolder and slotFolder:IsA("Folder") then
+		return slotFolder
+	end
+
+	return nil
+end
+
+local function getCustomizationTemplate(slotName: string, itemId: string): Instance?
+	local slotFolder = getCustomizationRoot(slotName)
+	return slotFolder and slotFolder:FindFirstChild(itemId) or nil
+end
+
+local function readDisplayName(instance: Instance): string
+	local displayName = instance:FindFirstChild("DisplayName")
+	if displayName and displayName:IsA("StringValue") and displayName.Value ~= "" then
+		return displayName.Value
+	end
+
+	return instance.Name
+end
+
+local function readLayoutOrder(instance: Instance): number
+	local layoutOrder = instance:FindFirstChild("LayoutOrder")
+	if layoutOrder and (layoutOrder:IsA("NumberValue") or layoutOrder:IsA("IntValue")) then
+		return layoutOrder.Value
+	end
+
+	return 0
+end
+
+local function customizationSupportsVehicle(instance: Instance, vehicleId: string): boolean
+	local targetVehicle = instance:FindFirstChild("VehicleId")
+	if targetVehicle and targetVehicle:IsA("StringValue") and targetVehicle.Value ~= "" then
+		return targetVehicle.Value == vehicleId
+	end
+
+	return true
 end
 
 function VehicleGarage.playerOwns(player: Player, vehicleId: string): boolean
@@ -119,7 +203,7 @@ local function ensureVehicleRecords(player: Player)
 	end
 end
 
-function VehicleGarage.getMenuData(player: Player)
+function VehicleGarage.getMenuData(player: Player, selectedVehicleId: string?)
 	ensureVehicleRecords(player)
 
 	local catalog = {}
@@ -138,6 +222,7 @@ function VehicleGarage.getMenuData(player: Player)
 	return {
 		catalog = catalog,
 		owned = ownedIds,
+		customizations = VehicleGarage.getCustomizationMenuData(player, selectedVehicleId),
 	}
 end
 
@@ -215,6 +300,8 @@ local function prepareVehicleModel(model: Model, owner: Player, vehicleId: strin
 		end
 	end
 
+	Vehicle.setupWheelVisuals(model)
+
 	local seat = model:FindFirstChildWhichIsA("VehicleSeat", true)
 	if seat then
 		seat:SetAttribute("OwnerUserId", owner.UserId)
@@ -245,6 +332,176 @@ local function getSpawnCFrame(character: Model): CFrame?
 	end
 
 	return CFrame.lookAt(targetPosition, targetPosition + flatLook)
+end
+
+function VehicleGarage.getCustomizationMenuData(player: Player, vehicleId: string?)
+	local result = {
+		frontBumpers = {},
+		equipped = {},
+	}
+
+	if vehicleId and type(vehicleId) == "string" then
+		local equipped = getEquippedCustomization(player, vehicleId, FRONT_BUMPER_SLOT)
+		if equipped then
+			result.equipped[FRONT_BUMPER_SLOT] = equipped
+		end
+	end
+
+	local slotFolder = getCustomizationRoot(FRONT_BUMPER_SLOT)
+	if not slotFolder then
+		return result
+	end
+
+	for _, item in slotFolder:GetChildren() do
+		if not (item:IsA("BasePart") or item:IsA("Model") or item:IsA("Folder")) then
+			continue
+		end
+
+		if vehicleId and not customizationSupportsVehicle(item, vehicleId) then
+			continue
+		end
+
+		table.insert(result.frontBumpers, {
+			id = item.Name,
+			displayName = readDisplayName(item),
+			layoutOrder = readLayoutOrder(item),
+			equipped = vehicleId ~= nil and getEquippedCustomization(player, vehicleId, FRONT_BUMPER_SLOT) == item.Name or false,
+		})
+	end
+
+	table.sort(result.frontBumpers, function(a, b)
+		if a.layoutOrder ~= b.layoutOrder then
+			return a.layoutOrder < b.layoutOrder
+		end
+		return a.displayName < b.displayName
+	end)
+
+	return result
+end
+
+function VehicleGarage.equipCustomization(player: Player, vehicleId: string, slotName: string, itemId: string?)
+	if type(vehicleId) ~= "string" or vehicleId == "" then
+		return {success = false, reason = "Invalid vehicle"}
+	end
+
+	if slotName ~= FRONT_BUMPER_SLOT then
+		return {success = false, reason = "Invalid customization slot"}
+	end
+
+	if not VehicleGarage.playerOwns(player, vehicleId) then
+		return {success = false, reason = "You do not own this vehicle"}
+	end
+
+	local vehicleFolder = getOrCreateVehicleCustomizationFolder(player, vehicleId)
+	if not vehicleFolder then
+		return {success = false, reason = "Customization data unavailable"}
+	end
+
+	local equipped = vehicleFolder:FindFirstChild(slotName)
+	if not equipped then
+		equipped = Instance.new("StringValue")
+		equipped.Name = slotName
+		equipped.Parent = vehicleFolder
+	end
+
+	if itemId == nil or itemId == "" then
+		equipped.Value = ""
+		return {success = true, reason = "Unequipped", customizations = VehicleGarage.getCustomizationMenuData(player, vehicleId)}
+	end
+
+	if type(itemId) ~= "string" then
+		return {success = false, reason = "Invalid part"}
+	end
+
+	local template = getCustomizationTemplate(slotName, itemId)
+	if not template or not customizationSupportsVehicle(template, vehicleId) then
+		return {success = false, reason = "Part not found"}
+	end
+
+	equipped.Value = itemId
+	return {success = true, reason = "Equipped", customizations = VehicleGarage.getCustomizationMenuData(player, vehicleId)}
+end
+
+local function getAttachmentHolder(instance: Instance): BasePart?
+	if instance:IsA("BasePart") then
+		return instance
+	end
+
+	if instance:IsA("Model") then
+		return instance.PrimaryPart or instance:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	return instance:FindFirstChildWhichIsA("BasePart", true)
+end
+
+local function applyFrontBumper(vehicle: Model, player: Player, vehicleId: string)
+	local itemId = getEquippedCustomization(player, vehicleId, FRONT_BUMPER_SLOT)
+	if not itemId then
+		return
+	end
+
+	local template = getCustomizationTemplate(FRONT_BUMPER_SLOT, itemId)
+	if not template then
+		warn(`VehicleGarage: Missing front bumper customization '{itemId}'`)
+		return
+	end
+
+	local mainPart = vehicle:FindFirstChild("MainPart", true)
+	if not mainPart or not mainPart:IsA("BasePart") then
+		warn(`VehicleGarage: Vehicle '{vehicleId}' is missing a MainPart for front bumper customization`)
+		return
+	end
+
+	local vehicleAttachment = mainPart:FindFirstChild("FrontBumperAttachment")
+	if not vehicleAttachment or not vehicleAttachment:IsA("Attachment") then
+		warn(`VehicleGarage: Vehicle '{vehicleId}' MainPart is missing FrontBumperAttachment`)
+		return
+	end
+
+	local clone = template:Clone()
+	clone.Name = itemId
+	clone.Parent = vehicle
+
+	local holder = getAttachmentHolder(clone)
+	if not holder then
+		clone:Destroy()
+		return
+	end
+
+	local partAttachment = clone:FindFirstChild("Attachment", true)
+	if not partAttachment or not partAttachment:IsA("Attachment") then
+		warn(`VehicleGarage: Front bumper '{itemId}' is missing an Attachment`)
+		clone:Destroy()
+		return
+	end
+
+	local targetCFrame = vehicleAttachment.WorldCFrame * partAttachment.CFrame:Inverse()
+	if clone:IsA("Model") then
+		clone:PivotTo(targetCFrame)
+	elseif clone:IsA("BasePart") then
+		clone.CFrame = targetCFrame
+	else
+		holder.CFrame = targetCFrame
+	end
+
+	local partsToWeld = {}
+	if clone:IsA("BasePart") then
+		table.insert(partsToWeld, clone)
+	end
+	for _, descendant in clone:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			table.insert(partsToWeld, descendant)
+		end
+	end
+
+	for _, part in partsToWeld do
+		part.Anchored = false
+		part.CanCollide = false
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = mainPart
+		weld.Part1 = part
+		weld.Parent = part
+	end
 end
 
 function VehicleGarage.despawnVehicle(player: Player)
@@ -299,6 +556,7 @@ function VehicleGarage.spawnVehicle(player: Player, vehicleId: string)
 	vehicle.Name = `{player.Name}_{vehicleId}`
 	prepareVehicleModel(vehicle, player, vehicleId)
 	vehicle:PivotTo(spawnCFrame)
+	applyFrontBumper(vehicle, player, vehicleId)
 	vehicle.Parent = getSpawnFolder()
 
 	spawnedVehicles[player] = vehicle
