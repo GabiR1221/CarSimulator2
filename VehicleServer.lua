@@ -30,6 +30,11 @@ end
 local function assignOwnership(player: Player, seat: VehicleSeat)
 	releaseOwnership(player)
 
+	local vehicleModel = Vehicle.getVehicleModel(seat)
+	if vehicleModel then
+		Vehicle.setupWheelVisuals(vehicleModel)
+	end
+
 	local rootPart = seat.AssemblyRootPart
 	if not rootPart then
 		return
