@@ -6,6 +6,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local Vehicle = require(ReplicatedStorage.Modules.Vehicle)
@@ -13,14 +14,83 @@ local Vehicle = require(ReplicatedStorage.Modules.Vehicle)
 local player = Players.LocalPlayer
 
 local connections: {RBXScriptConnection} = {}
+local visualWheelConnection: RBXScriptConnection? = nil
+local activeWheelVisuals = {}
 local currentSeat: VehicleSeat? = nil
 local activeCharacter: Model? = nil
+
+local function getVisualWheelTuningOffset(visualPart: BasePart): CFrame
+	-- Optional per-mesh tuning attributes, in degrees.
+	-- Add these Attributes to a VisualWheel if the imported mesh faces sideways/backward:
+	-- VisualWheelOffsetX, VisualWheelOffsetY, VisualWheelOffsetZ
+	local offsetX = tonumber(visualPart:GetAttribute("VisualWheelOffsetX")) or 0
+	local offsetY = tonumber(visualPart:GetAttribute("VisualWheelOffsetY")) or 0
+	local offsetZ = tonumber(visualPart:GetAttribute("VisualWheelOffsetZ")) or 0
+
+	return CFrame.Angles(
+		math.rad(offsetX),
+		math.rad(offsetY),
+		math.rad(offsetZ)
+	)
+end
+
+local function buildActiveWheelVisuals(vehicleModel: Model)
+	local wheelVisuals = Vehicle.getWheelVisuals(vehicleModel)
+	local activeVisuals = {}
+
+	for _, wheelVisual in wheelVisuals do
+		local physicalWheel = wheelVisual.physicalWheel
+		local visualPart = wheelVisual.visualPart
+		if physicalWheel.Parent and visualPart.Parent then
+			table.insert(activeVisuals, {
+				physicalWheel = physicalWheel,
+				visualPart = visualPart,
+				welds = wheelVisual.welds,
+				visualOffset = physicalWheel.CFrame:ToObjectSpace(visualPart.CFrame) * getVisualWheelTuningOffset(visualPart),
+			})
+		end
+	end
+
+	return activeVisuals
+end
+
+local function setVisualWheelWeldsEnabled(enabled: boolean)
+	for _, wheelVisual in activeWheelVisuals do
+		for _, weld in wheelVisual.welds do
+			if weld.Parent then
+				weld.Enabled = enabled
+			end
+		end
+	end
+end
+
+local function snapVisualWheelsToPhysicalWheels()
+	for _, wheelVisual in activeWheelVisuals do
+		local physicalWheel = wheelVisual.physicalWheel
+		local visualPart = wheelVisual.visualPart
+		if physicalWheel.Parent and visualPart.Parent then
+			visualPart.CFrame = physicalWheel.CFrame * wheelVisual.visualOffset
+		end
+	end
+end
+
+local function stopVisualWheelSync()
+	if visualWheelConnection then
+		visualWheelConnection:Disconnect()
+		visualWheelConnection = nil
+	end
+
+	snapVisualWheelsToPhysicalWheels()
+	setVisualWheelWeldsEnabled(true)
+	table.clear(activeWheelVisuals)
+end
 
 local function disconnectSignals()
 	for _, connection in connections do
 		connection:Disconnect()
 	end
 	table.clear(connections)
+	stopVisualWheelSync()
 end
 
 local function clearVehicleState()
@@ -62,6 +132,27 @@ local function applyThrottle(
 	end
 end
 
+local function startVisualWheelSync(vehicleModel: Model, seatPart: VehicleSeat)
+	stopVisualWheelSync()
+
+	activeWheelVisuals = buildActiveWheelVisuals(vehicleModel)
+	if #activeWheelVisuals == 0 then
+		return
+	end
+
+	snapVisualWheelsToPhysicalWheels()
+	setVisualWheelWeldsEnabled(false)
+
+	visualWheelConnection = RunService.RenderStepped:Connect(function()
+		if currentSeat ~= seatPart or not seatPart.Occupant then
+			stopVisualWheelSync()
+			return
+		end
+
+		snapVisualWheelsToPhysicalWheels()
+	end)
+end
+
 local function bindVehicleSeat(seatPart: VehicleSeat)
 	local vehicleModel = Vehicle.getVehicleModel(seatPart)
 	if not vehicleModel then
@@ -75,6 +166,7 @@ local function bindVehicleSeat(seatPart: VehicleSeat)
 	end
 
 	currentSeat = seatPart
+	startVisualWheelSync(vehicleModel, seatPart)
 
 	table.insert(connections, seatPart:GetPropertyChangedSignal("SteerFloat"):Connect(function()
 		if currentSeat ~= seatPart then
