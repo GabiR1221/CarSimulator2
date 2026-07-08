@@ -72,13 +72,13 @@ LoadingFunctions.LoadData = function(Player)
 
 	for _,Gamepass in MainFolder.Gamepasses:GetChildren() do
 		if Gamepass.Value then continue end -- only check if you DONT have it
-		
+
 		if RS.Gamepasses:FindFirstChild(Gamepass.Name) == nil then continue end
-		
+
 		local GPId = RS.Gamepasses[Gamepass.Name].Value
 		Gamepass.Value = MPS:UserOwnsGamePassAsync(Player.UserId, GPId)
 	end
-	
+
 	--// Pets	
 	PetMultipliers.AddPlayer(Player.Name)
 
@@ -89,13 +89,13 @@ LoadingFunctions.LoadData = function(Player)
 			NewPet.Equipped.Value = PetInfo.Equipped
 			NewPet.PetName.Value = PetInfo.PetName
 			NewPet.Parent = MainFolder.Pets
-			
+
 			if PetInfo.Equipped then
 				PetMultipliers.AddPet(Player.Name, NewPet)
 			end
 		end
 	end
-	
+
 	--// Vehicles
 	for _, entry in VehicleCatalog.getEntries() do
 		local owned = MainFolder.Vehicles:FindFirstChild(entry.id)
@@ -114,18 +114,58 @@ LoadingFunctions.LoadData = function(Player)
 		end
 	end
 
+	--// Vehicle customizations
+	local customizationsFolder = MainFolder:FindFirstChild("VehicleCustomizations")
+	if customizationsFolder and Datastore and Datastore.VehicleCustomizations then
+		for vehicleId, customizations in Datastore.VehicleCustomizations do
+			if type(customizations) ~= "table" then
+				continue
+			end
+
+			local vehicleFolder = Instance.new("Folder")
+			vehicleFolder.Name = tostring(vehicleId)
+			vehicleFolder.Parent = customizationsFolder
+
+			for slotName, itemId in customizations do
+				if type(itemId) == "string" and itemId ~= "" then
+					local equipped = Instance.new("StringValue")
+					equipped.Name = tostring(slotName)
+					equipped.Value = itemId
+					equipped.Parent = vehicleFolder
+				end
+			end
+		end
+	end
+
+	--// Vehicle Customizations
+	if Datastore and Datastore.VehicleCustomizations then
+		for vehicleId, customizations in Datastore.VehicleCustomizations do
+			local vehicleFolder = Instance.new("Folder")
+			vehicleFolder.Name = vehicleId
+			vehicleFolder.Parent = MainFolder.VehicleCustomizations
+			for valueName, value in customizations do
+				if type(value) == "string" and value ~= "" then
+					local stringValue = Instance.new("StringValue")
+					stringValue.Name = valueName
+					stringValue.Value = value
+					stringValue.Parent = vehicleFolder
+				end
+			end
+		end
+	end
+
 	--// Auto Delete
 	for _, Pet in RS.Pets:GetChildren() do
 		local AutoDelete = Instance.new("BoolValue")
-		
+
 		if Datastore and Datastore.AutoDelete and Datastore.AutoDelete[Pet.Name] then
 			AutoDelete.Value = Datastore.AutoDelete[Pet.Name]
 		end
-		
+
 		AutoDelete.Name = Pet.Name
 		AutoDelete.Parent = MainFolder.AutoDelete
 	end
-	
+
 	Player.NonSaveValues.PetsEquipped.Value = PetMultipliers.GetPetsEquipped(Player.Name)
 end
 
