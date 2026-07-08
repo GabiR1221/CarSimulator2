@@ -6,9 +6,10 @@ return {
 		"Gamepasses",
 		"Pets",
 		"Vehicles",
+		"VehicleCustomizations",
 		"AutoDelete",
 	},
-	
+
 	["SaveValues"] = {
 		["PlayerData"] = {
 			{Name = "Currency", Value = 0, ID = 1, Type = "NumberValue"},
@@ -17,7 +18,7 @@ return {
 			{Name = "ShowOtherPets", Value = 0, ID = 4, Type = "BoolValue"},
 			{Name = "BestZone", Value = 0, ID = 5, Type = "IntValue"},
 			{Name = "Currency2", Value = 0, ID = 6, Type = "NumberValue"},
-			
+
 			--// Statistics
 			{Name = "EggsHatched", Value = 0, ID = 9, Type = "IntValue"},
 			{Name = "TotalCurrency", Value = 0, ID = 10, Type = "IntValue"},
@@ -26,7 +27,7 @@ return {
 			{Name = "GemUpgrade1", Value = 0, ID = 7, Type = "IntValue"},
 			{Name = "GemUpgrade2", Value = 0, ID = 8, Type = "IntValue"},
 		},
-		
+
 		["Gamepasses"] = {
 			{Name = "DoubleCurrency", Value = false, ID = 1, Type = "BoolValue"},
 			{Name = "MoreStorage1", Value = false, ID = 2, Type = "BoolValue"}, -- dont worry about this if u have the gamepasses disabled, as it will do nothing :)
@@ -38,7 +39,7 @@ return {
 			{Name = "MorePets2", Value = false, ID = 8, Type = "BoolValue"},
 		}
 	},
-	
+
 	["NonSaveValues"] = {
 		{Name = "IsOpeningEgg", Value = false, Type = "BoolValue"},
 		{Name = "PetsEquipped", Value = 0, Type = "IntValue"},
