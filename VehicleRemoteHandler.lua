@@ -6,6 +6,7 @@
 	- GetMenuData (RemoteFunction)
 	- Buy (RemoteFunction)
 	- Spawn (RemoteFunction)
+	- Customize (RemoteFunction)
 ]]
 
 local Players = game:GetService("Players")
@@ -18,17 +19,18 @@ local remotesFolder = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Ve
 local getMenuDataRemote = remotesFolder:WaitForChild("GetMenuData")
 local buyRemote = remotesFolder:WaitForChild("Buy")
 local spawnRemote = remotesFolder:WaitForChild("Spawn")
+local customizeRemote = remotesFolder:WaitForChild("Customize")
 
 local function isPlayerReady(player: Player): boolean
 	return player:FindFirstChild("Loaded") ~= nil and player.Loaded.Value == true
 end
 
-getMenuDataRemote.OnServerInvoke = function(player)
+getMenuDataRemote.OnServerInvoke = function(player, selectedVehicleId)
 	if not isPlayerReady(player) then
-		return {catalog = {}, owned = {}}
+		return {catalog = {}, owned = {}, customizations = {sections = {}, equipped = {}}}
 	end
 
-	return VehicleGarage.getMenuData(player)
+	return VehicleGarage.getMenuData(player, selectedVehicleId)
 end
 
 buyRemote.OnServerInvoke = function(player, vehicleId)
@@ -45,6 +47,14 @@ spawnRemote.OnServerInvoke = function(player, vehicleId)
 	end
 
 	return VehicleGarage.spawnVehicle(player, vehicleId)
+end
+
+customizeRemote.OnServerInvoke = function(player, vehicleId, slotName, itemId, color)
+	if not isPlayerReady(player) then
+		return {success = false, reason = "Still loading"}
+	end
+
+	return VehicleGarage.equipCustomization(player, vehicleId, slotName, itemId, color)
 end
 
 Players.PlayerAdded:Connect(function(player)
