@@ -19,12 +19,16 @@ local activeWheelVisuals = {}
 local currentSeat: VehicleSeat? = nil
 local activeCharacter: Model? = nil
 
-local function getVisualWheelTuningOffset(visualPart: BasePart): CFrame
+local function isRightSideWheel(wheelName: string): boolean
+	return string.sub(wheelName, -1) == "R"
+end
+
+local function getVisualWheelTuningOffset(wheelName: string, visualPart: BasePart): CFrame
 	-- Optional per-mesh tuning attributes, in degrees.
 	-- Add these Attributes to a VisualWheel if the imported mesh faces sideways/backward:
 	-- VisualWheelOffsetX, VisualWheelOffsetY, VisualWheelOffsetZ
 	local offsetX = tonumber(visualPart:GetAttribute("VisualWheelOffsetX")) or 0
-	local offsetY = tonumber(visualPart:GetAttribute("VisualWheelOffsetY")) or 0
+	local offsetY = tonumber(visualPart:GetAttribute("VisualWheelOffsetY")) or (isRightSideWheel(wheelName) and 180 or 0)
 	local offsetZ = tonumber(visualPart:GetAttribute("VisualWheelOffsetZ")) or 0
 
 	return CFrame.Angles(
@@ -32,6 +36,19 @@ local function getVisualWheelTuningOffset(visualPart: BasePart): CFrame
 		math.rad(offsetY),
 		math.rad(offsetZ)
 	)
+end
+
+local function getVisualWheelSideOffset(wheelName: string, visualPart: BasePart, physicalWheel: BasePart, vehicleModel: Model): number
+	local explicitOffset = tonumber(visualPart:GetAttribute("VisualWheelSideOffset"))
+	if explicitOffset then return explicitOffset end
+
+	if isRightSideWheel(wheelName) then
+		local vehicleOffset = tonumber(vehicleModel:GetAttribute("RightVisualWheelSideOffset"))
+		if vehicleOffset then return vehicleOffset end
+		return physicalWheel.Size.X
+	end
+
+	return tonumber(vehicleModel:GetAttribute("LeftVisualWheelSideOffset")) or 0
 end
 
 local function buildActiveWheelVisuals(vehicleModel: Model)
@@ -43,10 +60,12 @@ local function buildActiveWheelVisuals(vehicleModel: Model)
 		local visualPart = wheelVisual.visualPart
 		if physicalWheel.Parent and visualPart.Parent then
 			table.insert(activeVisuals, {
+				vehicleModel = vehicleModel,
 				physicalWheel = physicalWheel,
 				visualPart = visualPart,
 				welds = wheelVisual.welds,
-				visualOffset = physicalWheel.CFrame:ToObjectSpace(visualPart.CFrame) * getVisualWheelTuningOffset(visualPart),
+				visualOffset = physicalWheel.CFrame:ToObjectSpace(visualPart.CFrame) * getVisualWheelTuningOffset(wheelVisual.wheelName, visualPart),
+				sideOffset = getVisualWheelSideOffset(wheelVisual.wheelName, visualPart, physicalWheel, vehicleModel),
 			})
 		end
 	end
@@ -69,7 +88,9 @@ local function snapVisualWheelsToPhysicalWheels()
 		local physicalWheel = wheelVisual.physicalWheel
 		local visualPart = wheelVisual.visualPart
 		if physicalWheel.Parent and visualPart.Parent then
-			visualPart.CFrame = physicalWheel.CFrame * wheelVisual.visualOffset
+			local vehicleModel = wheelVisual.vehicleModel
+			local rightVector = vehicleModel.PrimaryPart and vehicleModel.PrimaryPart.CFrame.RightVector or Vector3.zero
+			visualPart.CFrame = (physicalWheel.CFrame * wheelVisual.visualOffset) + rightVector * wheelVisual.sideOffset
 		end
 	end
 end
