@@ -33,6 +33,7 @@ local customizeButton = infoPanel and infoPanel:FindFirstChild("CustomizeButton"
 local mainCustomizeFrame = vehiclesFrame:FindFirstChild("MainCustomizeFrame")
 local backFrame = vehiclesFrame:FindFirstChild("Back")
 local backButton = backFrame and backFrame:FindFirstChild("Click", true)
+local rootColorsFrame = vehiclesFrame:FindFirstChild("ColorsFrame")
 
 local SECTION_BUTTONS = {Exterior = "ExteriorButton", Interior = "InteriorButton", Wheels = "WheelsButton"}
 local DEFAULT_SLOT_BUTTONS = {FrontBumper = "FrontBumpersButton", BackBumper = "BackBumpersButton", Tire = "TiresButton", Rim = "RimsButton", Dashboard = "DashboardButton"}
@@ -54,6 +55,7 @@ dealershipFrame.Visible = false
 if infoPanel then infoPanel.Visible = false end
 if mainCustomizeFrame then mainCustomizeFrame.Visible = false end
 if backFrame then backFrame.Visible = false end
+if rootColorsFrame and rootColorsFrame:IsA("GuiObject") then rootColorsFrame.Visible = false end
 
 for _, child in vehiclesFrame:GetChildren() do
 	if child:IsA("GuiObject") and (child.Name:match("CustomizeFrame$") or child.Name:match("Frame$")) and child ~= ownedFrame and child ~= dealershipFrame and child ~= infoPanel and child ~= mainCustomizeFrame and child ~= backFrame and child ~= firstButtons then
@@ -66,6 +68,20 @@ end
 local function getLabel(button: Instance): TextLabel?
 	local label = button:FindFirstChild("ExampleLabel", true) or button:FindFirstChildWhichIsA("TextLabel", true)
 	return label and label:IsA("TextLabel") and label or nil
+end
+
+local function getOrCreateButtonLabel(button: GuiButton): TextLabel?
+	local label = getLabel(button)
+	if label then return label end
+	if not button:IsA("ImageButton") then return nil end
+	label = Instance.new("TextLabel")
+	label.Name = "GeneratedLabel"
+	label.BackgroundTransparency = 1
+	label.Size = UDim2.fromScale(1, 1)
+	label.TextScaled = true
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Parent = button
+	return label
 end
 
 local function clearGeneratedButtons(container: Instance, template: Instance?)
@@ -93,13 +109,22 @@ local function refreshMenuData(selectedVehicleId: string?): boolean
 	return true
 end
 
+local function showGuiWithAncestors(guiObject: GuiObject)
+	local current: Instance? = guiObject
+	while current and current ~= vehiclesFrame do
+		if current:IsA("GuiObject") then current.Visible = true end
+		current = current.Parent
+	end
+end
+
 local function hideCustomizationFrames()
 	if mainCustomizeFrame then mainCustomizeFrame.Visible = false end
+	if rootColorsFrame and rootColorsFrame:IsA("GuiObject") then rootColorsFrame.Visible = false end
 	for _, section in menuData.customizations.sections or {} do
-		local sectionFrame = vehiclesFrame:FindFirstChild(section.frame)
+		local sectionFrame = vehiclesFrame:FindFirstChild(section.frame, true)
 		if sectionFrame and sectionFrame:IsA("GuiObject") then sectionFrame.Visible = false end
 		for _, slot in section.slots do
-			local slotFrame = vehiclesFrame:FindFirstChild(slot.frame)
+			local slotFrame = vehiclesFrame:FindFirstChild(slot.frame, true)
 			if slotFrame and slotFrame:IsA("GuiObject") then slotFrame.Visible = false end
 		end
 	end
@@ -114,13 +139,13 @@ local function showView(view: string)
 	if view == "MainCustomize" and mainCustomizeFrame then mainCustomizeFrame.Visible = true end
 	if view == "Section" and selectedSectionName then
 		local section = menuData.customizations.sections[selectedSectionName]
-		local frame = section and vehiclesFrame:FindFirstChild(section.frame)
-		if frame and frame:IsA("GuiObject") then frame.Visible = true end
+		local frame = section and vehiclesFrame:FindFirstChild(section.frame, true)
+		if frame and frame:IsA("GuiObject") then showGuiWithAncestors(frame) end
 	end
 	if view == "Slot" and selectedSectionName and selectedSlotName then
 		local slot = menuData.customizations.sections[selectedSectionName].slots[selectedSlotName]
-		local frame = slot and vehiclesFrame:FindFirstChild(slot.frame)
-		if frame and frame:IsA("GuiObject") then frame.Visible = true end
+		local frame = slot and vehiclesFrame:FindFirstChild(slot.frame, true)
+		if frame and frame:IsA("GuiObject") then showGuiWithAncestors(frame) end
 	end
 	if backFrame then backFrame.Visible = view ~= "Root" end
 end
@@ -133,13 +158,25 @@ local function getColorFromButton(button: GuiButton): Color3
 	return Color3.new(1, 1, 1)
 end
 
+local function findColorsFrame(container: Instance): Instance?
+	local colorsFrame = container:FindFirstChild("ColorsFrame", true)
+	if colorsFrame then return colorsFrame end
+	local parent = container.Parent
+	while parent and parent ~= vehiclesFrame do
+		colorsFrame = parent:FindFirstChild("ColorsFrame", true)
+		if colorsFrame then return colorsFrame end
+		parent = parent.Parent
+	end
+	return rootColorsFrame
+end
+
 local function bindColorsFrame(container: Instance, slotName: string)
-	local colorsFrame = container:FindFirstChild("ColorsFrame")
-	if not colorsFrame then return end
+	local colorsFrame = findColorsFrame(container)
+	if not colorsFrame or not colorsFrame:IsA("GuiObject") then setStatus("Add a ColorsFrame inside this customization frame"); return end
 	colorsFrame.Visible = true
 	for _, button in colorsFrame:GetDescendants() do
-		if button:IsA("GuiButton") and not button:GetAttribute("ColorBound") then
-			button:SetAttribute("ColorBound", true)
+		if button:IsA("GuiButton") and not button:GetAttribute(`ColorBound_{slotName}`) then
+			button:SetAttribute(`ColorBound_{slotName}`, true)
 			button.MouseButton1Click:Connect(function()
 				if isActionLocked or not selectedVehicle then return end
 				isActionLocked = true
@@ -156,17 +193,25 @@ local function populateSlot(sectionName: string, slotName: string)
 	local section = menuData.customizations.sections[sectionName]
 	local slot = section and section.slots[slotName]
 	if not slot then return end
-	local frame = vehiclesFrame:FindFirstChild(slot.frame)
+	local frame = vehiclesFrame:FindFirstChild(slot.frame, true)
 	if not frame then return end
 	local template = frame:FindFirstChild(DEFAULT_TEMPLATES[slotName] or `Example{slotName}Button`) or frame:FindFirstChildWhichIsA("GuiButton")
 	if template and template:IsA("GuiObject") then template.Visible = false end
 	clearGeneratedButtons(frame, template)
+	if slot.mode == "ColorOnly" then
+		bindColorsFrame(frame, slotName)
+		setStatus("Pick a color for this customization")
+		return
+	end
+	if #(slot.items or {}) == 0 then
+		setStatus(`No {slot.displayName or slotName} options found in ReplicatedStorage.VehicleCustomizations`)
+	end
 	for _, entry in slot.items or {} do
 		local button = template and template:Clone() or Instance.new("TextButton")
 		button.Name = entry.id
 		button.Visible = true
 		button.LayoutOrder = entry.layoutOrder or 0
-		local label = getLabel(button)
+		local label = getOrCreateButtonLabel(button)
 		if label then label.Text = `{entry.displayName}\n{entry.equipped and "Equipped" or "Equip"}` elseif button:IsA("TextButton") then button.Text = `{entry.displayName} - {entry.equipped and "Equipped" or "Equip"}` end
 		button.MouseButton1Click:Connect(function()
 			if isActionLocked or not selectedVehicle then return end
@@ -184,16 +229,22 @@ end
 local function populateSection(sectionName: string)
 	local section = menuData.customizations.sections[sectionName]
 	if not section then return end
-	local frame = vehiclesFrame:FindFirstChild(section.frame)
+	local frame = vehiclesFrame:FindFirstChild(section.frame, true)
 	if not frame then return end
 	for slotName, slot in section.slots do
 		local button = frame:FindFirstChild(DEFAULT_SLOT_BUTTONS[slotName] or `{slotName}Button`, true)
 		if button and button:IsA("GuiButton") then
-			button.Visible = #(slot.items or {}) > 0 or slot.mode == "ColorOnly"
+			button.Visible = true
+			if button:GetAttribute("SlotBound") then continue end
+			button:SetAttribute("SlotBound", true)
 			button.MouseButton1Click:Connect(function()
 				Utilities.Audio.PlayAudio("Click")
-				if refreshMenuData(selectedVehicle and selectedVehicle.id or nil) then selectedSectionName = sectionName; selectedSlotName = slotName; populateSlot(sectionName, slotName) end
-				showView("Slot")
+				if refreshMenuData(selectedVehicle and selectedVehicle.id or nil) then
+					selectedSectionName = sectionName
+					selectedSlotName = slotName
+					showView("Slot")
+					populateSlot(sectionName, slotName)
+				end
 			end)
 		end
 	end
@@ -204,7 +255,13 @@ local function populateMainCustomize()
 	for sectionName, section in menuData.customizations.sections or {} do
 		local button = mainCustomizeFrame:FindFirstChild(SECTION_BUTTONS[sectionName] or `{sectionName}Button`, true)
 		if button and button:IsA("GuiButton") then
-			button.Visible = true
+			local hasAvailableSlot = false
+			for _, slot in section.slots do
+				if slot.available ~= false then hasAvailableSlot = true; break end
+			end
+			button.Visible = hasAvailableSlot
+			if button:GetAttribute("SectionBound") then continue end
+			button:SetAttribute("SectionBound", true)
 			button.MouseButton1Click:Connect(function()
 				Utilities.Audio.PlayAudio("Click")
 				if refreshMenuData(selectedVehicle and selectedVehicle.id or nil) then selectedSectionName = sectionName; populateSection(sectionName) end
