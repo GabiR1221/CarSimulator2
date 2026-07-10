@@ -25,7 +25,7 @@ local CUSTOMIZATION_SECTIONS = {
 	Interior = {
 		frame = "InteriorCustomizeFrame",
 		slots = {
-			Dashboard = {folder = "Dashboard", frame = "DashboardFrame", mode = "ReplaceAndColor", interior = true, attachment = "DashboardAttachment"},
+			Dashboard = {folder = "Dashboard", frame = "DashboardFrame", mode = "ColorOnly", interior = true, targetNames = {"Dashboard", "Dash"}, targetPrefixes = {"dashboard"}},
 		},
 	},
 	Wheels = {
@@ -109,9 +109,48 @@ local function readLayoutOrder(instance: Instance): number
 	return layoutOrder and (layoutOrder:IsA("NumberValue") or layoutOrder:IsA("IntValue")) and layoutOrder.Value or 0
 end
 
+local METADATA_CHILDREN = {
+	DisplayName = true,
+	LayoutOrder = true,
+	SupportedVehicles = true,
+	VehicleId = true,
+}
+
+local function isCustomizationItem(instance: Instance): boolean
+	if METADATA_CHILDREN[instance.Name] then return false end
+	return instance:IsA("BasePart") or instance:IsA("Model") or instance:IsA("Folder")
+end
+
+local function vehicleIdMatches(configuredId: string, vehicleId: string): boolean
+	return string.lower(configuredId) == string.lower(vehicleId)
+end
+
 local function customizationSupportsVehicle(instance: Instance, vehicleId: string): boolean
 	local targetVehicle = instance:FindFirstChild("VehicleId")
-	return not (targetVehicle and targetVehicle:IsA("StringValue") and targetVehicle.Value ~= "") or targetVehicle.Value == vehicleId
+	if targetVehicle and targetVehicle:IsA("StringValue") and targetVehicle.Value ~= "" then
+		return vehicleIdMatches(targetVehicle.Value, vehicleId)
+	end
+
+	local supportedVehicles = instance:FindFirstChild("SupportedVehicles")
+	if supportedVehicles and supportedVehicles:IsA("Folder") then
+		local children = supportedVehicles:GetChildren()
+		if #children == 0 then return true end
+		for _, child in children do
+			if vehicleIdMatches(child.Name, vehicleId) then return true end
+			if child:IsA("StringValue") and child.Value ~= "" and vehicleIdMatches(child.Value, vehicleId) then return true end
+		end
+		return false
+	end
+
+	local supportedAttribute = instance:GetAttribute("SupportedVehicles")
+	if typeof(supportedAttribute) == "string" and supportedAttribute ~= "" then
+		for id in string.gmatch(supportedAttribute, "[^,%s]+") do
+			if vehicleIdMatches(id, vehicleId) then return true end
+		end
+		return false
+	end
+
+	return true
 end
 
 local function colorToString(color: Color3): string
@@ -123,6 +162,38 @@ local function stringToColor(value: string?): Color3?
 	local r, g, b = string.match(value, "^(%d+),(%d+),(%d+)$")
 	if not r then return nil end
 	return Color3.fromRGB(math.clamp(tonumber(r) or 0, 0, 255), math.clamp(tonumber(g) or 0, 0, 255), math.clamp(tonumber(b) or 0, 0, 255))
+end
+
+local function nameMatchesTarget(name: string, targets: {string}?, prefixes: {string}?): boolean
+	local lowered = string.lower(name)
+	if targets then
+		for _, target in targets do
+			if lowered == string.lower(target) then return true end
+		end
+	end
+	if prefixes then
+		for _, prefix in prefixes do
+			if string.sub(lowered, 1, #prefix) == string.lower(prefix) then return true end
+		end
+	end
+	return false
+end
+
+local function readCustomizationSlotName(instance: Instance): string?
+	local slotName = instance:GetAttribute("CustomizationSlot")
+	if typeof(slotName) == "string" and slotName ~= "" then return slotName end
+	local slotValue = instance:FindFirstChild("CustomizationSlot")
+	if slotValue and slotValue:IsA("StringValue") and slotValue.Value ~= "" then return slotValue.Value end
+	return nil
+end
+
+local function applyColorToSlotTargets(vehicle: Model, slotName: string, slot, color: Color3)
+	local searchRoot = slot.interior and (vehicle:FindFirstChild("interior") or vehicle:FindFirstChild("Interior")) or vehicle
+	for _, descendant in (searchRoot or vehicle):GetDescendants() do
+		if descendant:IsA("BasePart") and (readCustomizationSlotName(descendant) == slotName or nameMatchesTarget(descendant.Name, slot.targetNames, slot.targetPrefixes)) then
+			descendant.Color = color
+		end
+	end
 end
 
 function VehicleGarage.playerOwns(player: Player, vehicleId: string): boolean
@@ -172,16 +243,17 @@ function VehicleGarage.getCustomizationMenuData(player: Player, vehicleId: strin
 		for slotName, slot in section.slots do
 			local slotFolder = getCustomizationRoot(sectionName, slotName)
 			local items = {}
+			local slotAvailable = slotFolder ~= nil and (not vehicleId or customizationSupportsVehicle(slotFolder, vehicleId))
 			if slotFolder then
 				for _, item in slotFolder:GetChildren() do
-					if (item:IsA("BasePart") or item:IsA("Model") or item:IsA("Folder")) and (not vehicleId or customizationSupportsVehicle(item, vehicleId)) then
-						table.insert(items, {id = item.Name, displayName = readDisplayName(item), layoutOrder = readLayoutOrder(item), equipped = vehicleId ~= nil and getEquippedValue(player, vehicleId, slotName) == item.Name or false})
+					if slot.mode ~= "ColorOnly" and isCustomizationItem(item) then
+						table.insert(items, {id = item.Name, displayName = readDisplayName(item), layoutOrder = readLayoutOrder(item), equipped = vehicleId ~= nil and getEquippedValue(player, vehicleId, slotName) == item.Name or false, supported = not vehicleId or customizationSupportsVehicle(item, vehicleId)})
 					end
 				end
 			end
 			table.sort(items, function(a, b) return a.layoutOrder ~= b.layoutOrder and a.layoutOrder < b.layoutOrder or a.displayName < b.displayName end)
 			local colorValue = vehicleId and getEquippedValue(player, vehicleId, `{slotName}Color`) or nil
-			sectionData.slots[slotName] = {displayName = slotName, frame = slot.frame, mode = slot.mode, items = items, color = colorValue}
+			sectionData.slots[slotName] = {displayName = slotName, frame = slot.frame, mode = slot.mode, items = items, color = colorValue, available = slotAvailable}
 			if vehicleId then result.equipped[slotName] = getEquippedValue(player, vehicleId, slotName); result.colors[slotName] = colorValue end
 		end
 		result.sections[sectionName] = sectionData
@@ -258,14 +330,21 @@ function VehicleGarage.equipCustomization(player: Player, vehicleId: string, slo
 		if typeof(color) ~= "Color3" then return {success = false, reason = "Invalid color"} end
 		local colorValue = vehicleFolder:FindFirstChild(`{slotName}Color`) or Instance.new("StringValue")
 		colorValue.Name = `{slotName}Color`; colorValue.Value = colorToString(color); colorValue.Parent = vehicleFolder
+		local spawnedVehicle = spawnedVehicles[player]
+		if spawnedVehicle and spawnedVehicle.Parent and slot.mode == "ColorOnly" then
+			applyColorToSlotTargets(spawnedVehicle, slotName, slot, color)
+		end
 		return {success = true, reason = "Color changed", customizations = VehicleGarage.getCustomizationMenuData(player, vehicleId)}
+	end
+	if slot.mode == "ColorOnly" then
+		return {success = false, reason = "This customization only supports color"}
 	end
 	local equipped = vehicleFolder:FindFirstChild(slotName) or Instance.new("StringValue")
 	equipped.Name = slotName; equipped.Parent = vehicleFolder
 	if itemId == nil or itemId == "" then equipped.Value = ""; return {success = true, reason = "Unequipped", customizations = VehicleGarage.getCustomizationMenuData(player, vehicleId)} end
 	if type(itemId) ~= "string" then return {success = false, reason = "Invalid part"} end
 	local template = getCustomizationTemplate(sectionName, slotName, itemId)
-	if not template or not customizationSupportsVehicle(template, vehicleId) then return {success = false, reason = "Part not found"} end
+	if not template then return {success = false, reason = "Part not found"} end
 	equipped.Value = itemId
 	return {success = true, reason = "Equipped", customizations = VehicleGarage.getCustomizationMenuData(player, vehicleId)}
 end
@@ -321,28 +400,52 @@ local function replaceVisualWheelPart(visualWheel: Instance, slotName: string, t
 	if weldPart then weldTo(weldPart, clone) end
 end
 
+local function applyExistingWheelColor(vehicle: Model, wheelPartName: string, color: Color3?)
+	if not color then return end
+	for _, descendant in vehicle:GetDescendants() do
+		if descendant.Name == "VisualWheel" and (descendant:IsA("Model") or descendant:IsA("Folder")) then
+			local wheelPart = descendant:FindFirstChild(wheelPartName)
+			if wheelPart then applyColor(wheelPart, color) end
+		end
+	end
+end
+
 local function applyWheelCustomization(vehicle: Model, player: Player, vehicleId: string, sectionName: string, slotName: string, slot)
-	local itemId = getEquippedValue(player, vehicleId, slotName)
-	if not itemId then return end
-	local template = getCustomizationTemplate(sectionName, slotName, itemId)
-	if not template then return end
 	local color = stringToColor(getEquippedValue(player, vehicleId, `{slotName}Color`))
+	local itemId = getEquippedValue(player, vehicleId, slotName)
+	if not itemId then
+		applyExistingWheelColor(vehicle, slot.wheelPartName, color)
+		return
+	end
+	local template = getCustomizationTemplate(sectionName, slotName, itemId)
+	if not template then
+		applyExistingWheelColor(vehicle, slot.wheelPartName, color)
+		return
+	end
 	for _, descendant in vehicle:GetDescendants() do
 		if descendant.Name == "VisualWheel" and (descendant:IsA("Model") or descendant:IsA("Folder")) then replaceVisualWheelPart(descendant, slot.wheelPartName, template, color) end
 	end
 end
 
 local function applyColorOnlySlots(vehicle: Model, player: Player, vehicleId: string)
+	for sectionName, section in CUSTOMIZATION_SECTIONS do
+		for slotName, slot in section.slots do
+			if slot.mode ~= "ColorOnly" then continue end
+			local color = stringToColor(getEquippedValue(player, vehicleId, `{slotName}Color`))
+			if not color then continue end
+			applyColorToSlotTargets(vehicle, slotName, slot, color)
+		end
+	end
 	for _, descendant in vehicle:GetDescendants() do
-		local slotName = descendant:GetAttribute("CustomizationSlot")
-		if typeof(slotName) == "string" and descendant:IsA("BasePart") then descendant.Color = stringToColor(getEquippedValue(player, vehicleId, `{slotName}Color`)) or descendant.Color end
+		local slotName = readCustomizationSlotName(descendant)
+		if slotName and descendant:IsA("BasePart") then descendant.Color = stringToColor(getEquippedValue(player, vehicleId, `{slotName}Color`)) or descendant.Color end
 	end
 end
 
 local function applyCustomizations(vehicle: Model, player: Player, vehicleId: string)
 	for sectionName, section in CUSTOMIZATION_SECTIONS do
 		for slotName, slot in section.slots do
-			if sectionName == "Wheels" then applyWheelCustomization(vehicle, player, vehicleId, sectionName, slotName, slot) else applyAttachmentCustomization(vehicle, player, vehicleId, sectionName, slotName, slot) end
+			if slot.mode == "ColorOnly" then continue elseif sectionName == "Wheels" then applyWheelCustomization(vehicle, player, vehicleId, sectionName, slotName, slot) else applyAttachmentCustomization(vehicle, player, vehicleId, sectionName, slotName, slot) end
 		end
 	end
 	applyColorOnlySlots(vehicle, player, vehicleId)
