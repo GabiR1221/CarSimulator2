@@ -28,7 +28,7 @@ local function getVisualWheelTuningOffset(wheelName: string, visualPart: BasePar
 	-- Add these Attributes to a VisualWheel if the imported mesh faces sideways/backward:
 	-- VisualWheelOffsetX, VisualWheelOffsetY, VisualWheelOffsetZ
 	local offsetX = tonumber(visualPart:GetAttribute("VisualWheelOffsetX")) or 0
-	local offsetY = tonumber(visualPart:GetAttribute("VisualWheelOffsetY")) or (isRightSideWheel(wheelName) and 180 or 0)
+	local offsetY = tonumber(visualPart:GetAttribute("VisualWheelOffsetY")) or 0
 	local offsetZ = tonumber(visualPart:GetAttribute("VisualWheelOffsetZ")) or 0
 
 	return CFrame.Angles(
@@ -45,7 +45,9 @@ local function getVisualWheelSideOffset(wheelName: string, visualPart: BasePart,
 	if isRightSideWheel(wheelName) then
 		local vehicleOffset = tonumber(vehicleModel:GetAttribute("RightVisualWheelSideOffset"))
 		if vehicleOffset then return vehicleOffset end
-		return physicalWheel.Size.X
+
+		-- Changed from physicalWheel.Size.X to 0 so it stops moving your right wheels!
+		return 0 
 	end
 
 	return tonumber(vehicleModel:GetAttribute("LeftVisualWheelSideOffset")) or 0
